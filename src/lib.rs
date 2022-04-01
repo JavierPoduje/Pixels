@@ -1,6 +1,7 @@
-use im::Vector;
-use std::iter::FromIterator;
 use wasm_bindgen::prelude::*;
+
+mod image;
+mod uq;
 
 // When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
 // allocator.
@@ -10,144 +11,9 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-#[derive(Clone, Copy, PartialEq)]
-struct Rgb {
-    r: u8,
-    g: u8,
-    b: u8,
-}
-
-#[derive(Clone)]
-#[wasm_bindgen]
-pub struct Image {
-    width: usize,
-    height: usize,
-    cells: Vector<Rgb>,
-}
-
-#[wasm_bindgen]
-impl Image {
-    #[wasm_bindgen(constructor)]
-    pub fn new(width: usize, height: usize) -> Image {
-        let cells = Vector::from_iter((0..width * height).map(|_| Rgb {
-            r: 200,
-            g: 200,
-            b: 255,
-        }));
-
-        Image {
-            width,
-            height,
-            cells,
-        }
-    }
-
-    pub fn cells(&self) -> Vec<u8> {
-        self.cells
-            .iter()
-            .map(|rgb| vec![rgb.r, rgb.g, rgb.b])
-            .collect::<Vec<Vec<u8>>>()
-            .concat()
-    }
-
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    pub fn brush(&self, x: usize, y: usize, color: Vec<u8>) -> Option<Image> {
-        let index = (y * self.width) + x;
-        let color = Rgb {
-            r: color[0],
-            g: color[1],
-            b: color[2],
-        };
-
-        if self.cells[index] == color {
-            None
-        } else {
-            let new_cells = self.cells.update(index, color);
-
-            Some(Image {
-                width: self.width,
-                height: self.height,
-                cells: new_cells,
-            })
-        }
-    }
-}
-
-enum Mode {
-    Normal,
-    StartBlock,
-    InBlock,
-}
-
-struct UndoQueue<T: Clone> {
-    queue: Vec<T>,
-    index: usize,
-    mode: Mode,
-}
-
-impl<T: Clone> UndoQueue<T> {
-    pub fn new(entry: T) -> UndoQueue<T> {
-        UndoQueue {
-            queue: vec![entry],
-            index: 0,
-            mode: Mode::Normal,
-        }
-    }
-
-    pub fn current(&self) -> T {
-        self.queue[self.index].clone()
-    }
-
-    pub fn start_undo_block(&mut self) {
-        self.mode = Mode::StartBlock;
-    }
-
-    pub fn close_undo_block(&mut self) {
-        self.mode = Mode::Normal;
-    }
-
-    pub fn push(&mut self, entry: T) {
-        match self.mode {
-            Mode::Normal => {
-                self.queue.truncate(self.index + 1);
-                self.queue.push(entry);
-                self.index += 1;
-            },
-            Mode::StartBlock => {
-                self.queue.truncate(self.index + 1);
-                self.queue.push(entry);
-                self.index += 1;
-                self.mode = Mode::InBlock;
-            },
-            Mode::InBlock => {
-                self.queue[self.index] = entry;
-            }
-        }
-    }
-
-    pub fn undo(&mut self) {
-        if self.index >= 1 {
-            self.index -= 1;
-        }
-    }
-
-    pub fn redo(&mut self) {
-        if self.index < self.queue.len() - 1 {
-            self.index += 1;
-        }
-    }
-}
-
 #[wasm_bindgen]
 pub struct InternalState {
-    undo_queue: UndoQueue<Image>,
+    undo_queue: uq::UndoQueue<image::Image>,
 }
 
 #[wasm_bindgen]
@@ -155,11 +21,11 @@ impl InternalState {
     #[wasm_bindgen(constructor)]
     pub fn new(width: usize, height: usize) -> InternalState {
         InternalState {
-            undo_queue: UndoQueue::new(Image::new(width, height)),
+            undo_queue: uq::UndoQueue::new(image::Image::new(width, height)),
         }
     }
 
-    pub fn image(&self) -> Image {
+    pub fn image(&self) -> image::Image {
         self.undo_queue.current()
     }
 
@@ -187,5 +53,4 @@ impl InternalState {
             Some(new_image) => self.undo_queue.push(new_image),
         }
     }
-
 }
